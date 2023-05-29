@@ -132,13 +132,13 @@ namespace reshade
 		/// <item><description>IDXGIFactory2::CreateSwapChain(...)</description></item>
 		/// <item><description>IDXGISwapChain::ResizeBuffers</description></item>
 		/// <item><description>IDXGISwapChain3::ResizeBuffers1</description></item>
+		/// <item><description>wglSetPixelFormat</description></item>
 		/// <item><description>vkCreateSwapchainKHR</description></item>
 		/// </list>
 		/// <para>Callback function signature: <c>bool (api::swapchain_desc &amp;desc, void *hwnd)</c></para>
 		/// </summary>
 		/// <remarks>
 		/// To overwrite the swap chain description, modify <c>desc</c> in the callback and return <see langword="true"/>, otherwise return <see langword="false"/>.
-		/// Is not called in OpenGL (since it is not possible to influence swap chain creation there).
 		/// </remarks>
 		create_swapchain,
 
@@ -545,7 +545,7 @@ namespace reshade
 		/// <item><description>glCompressedTextureSubData2D</description></item>
 		/// <item><description>glCompressedTextureSubData3D</description></item>
 		/// </list>
-		/// <para>Callback function signature: <c>bool (api::device *device, const api::subresource_data &data, api::resource resource, uint32_t subresource, const api::subresource_box *box)</c></para>
+		/// <para>Callback function signature: <c>bool (api::device *device, const api::subresource_data &amp;data, api::resource resource, uint32_t subresource, const api::subresource_box *box)</c></para>
 		/// </summary>
 		/// <remarks>
 		/// To prevent this command from being executed, return <see langword="true"/>, otherwise return <see langword="false"/>.
@@ -792,6 +792,9 @@ namespace reshade
 		/// </list>
 		/// <para>Callback function signature: <c>void (api::command_list *cmd_list, uint32_t count, const api::render_pass_render_target_desc *rts, const api::render_pass_depth_stencil_desc *ds)</c></para>
 		/// </summary>
+		/// <remarks>
+		/// The depth-stencil description argument is optional and may be <see langword="nullptr"/>.
+		/// </remarks>
 		begin_render_pass,
 
 		/// <summary>
@@ -927,7 +930,7 @@ namespace reshade
 		/// <item><description>glUniform(...)</description></item>
 		/// <item><description>vkCmdPushConstants</description></item>
 		/// </list>
-		/// <para>Callback function signature: <c>void (api::command_list *cmd_list, api::shader_stage stages, api::pipeline_layout layout, uint32_t layout_param, uint32_t first, uint32_t count, const uint32_t *values)</c></para>
+		/// <para>Callback function signature: <c>void (api::command_list *cmd_list, api::shader_stage stages, api::pipeline_layout layout, uint32_t layout_param, uint32_t first, uint32_t count, const void *values)</c></para>
 		/// </summary>
 		push_constants,
 
@@ -1027,6 +1030,9 @@ namespace reshade
 		/// </list>
 		/// <para>Callback function signature: <c>void (api::command_list *cmd_list, uint32_t first, uint32_t count, const api::resource *buffers, const uint64_t *offsets, const uint32_t *strides)</c></para>
 		/// </summary>
+		/// <remarks>
+		/// The strides argument is optional and may be <see langword="nullptr"/>.
+		/// </remarks>
 		bind_vertex_buffers,
 
 		/// <summary>
@@ -1042,8 +1048,11 @@ namespace reshade
 		/// <item><description>glBindBuffersRange</description></item>
 		/// <item><description>vkCmdBindTransformFeedbackBuffersEXT</description></item>
 		/// </list>
-		/// <para>Callback function signature: <c>void (api::command_list *cmd_list, uint32_t first, uint32_t count, const api::resource *buffers, const uint64_t *offsets, const uint64_t *max_sizes)</c></para>
+		/// <para>Callback function signature: <c>void (api::command_list *cmd_list, uint32_t first, uint32_t count, const api::resource *buffers, const uint64_t *offsets, const uint64_t *max_sizes, const api::resource *counter_buffers, const uint64_t *counter_offsets)</c></para>
 		/// </summary>
+		/// <remarks>
+		/// The counter arguments are optional and may be <see langword="nullptr"/>.
+		/// </remarks>
 		bind_stream_output_buffers,
 
 		/// <summary>
@@ -1184,6 +1193,7 @@ namespace reshade
 		/// To prevent this command from being executed, return <see langword="true"/>, otherwise return <see langword="false"/>.
 		/// Source resource will be in the <see cref="api::resource_usage::copy_source"/> state.
 		/// Destination resource will be in the <see cref="api::resource_usage::copy_dest"/> state.
+		/// The subresource box argument is optional and may be <see langword="nullptr"/>.
 		/// </remarks>
 		copy_buffer_to_texture,
 
@@ -1215,6 +1225,7 @@ namespace reshade
 		/// To prevent this command from being executed, return <see langword="true"/>, otherwise return <see langword="false"/>.
 		/// Source resource will be in the <see cref="api::resource_usage::copy_source"/> state.
 		/// Destination resource will be in the <see cref="api::resource_usage::copy_dest"/> state.
+		/// The subresource box arguments are optional and may be <see langword="nullptr"/>.
 		/// </remarks>
 		copy_texture_region,
 
@@ -1231,6 +1242,7 @@ namespace reshade
 		/// To prevent this command from being executed, return <see langword="true"/>, otherwise return <see langword="false"/>.
 		/// Source resource will be in the <see cref="api::resource_usage::copy_source"/> state.
 		/// Destination resource will be in the <see cref="api::resource_usage::copy_dest"/> state.
+		/// The subresource box argument is optional and may be <see langword="nullptr"/>.
 		/// </remarks>
 		copy_texture_to_buffer,
 
@@ -1253,6 +1265,7 @@ namespace reshade
 		/// To prevent this command from being executed, return <see langword="true"/>, otherwise return <see langword="false"/>.
 		/// Source resource will be in the <see cref="api::resource_usage::resolve_source"/> state.
 		/// Destination resource will be in the <see cref="api::resource_usage::resolve_dest"/> state.
+		/// The subresource box argument is optional and may be <see langword="nullptr"/>.
 		/// </remarks>
 		resolve_texture_region,
 
@@ -1277,6 +1290,7 @@ namespace reshade
 		/// <remarks>
 		/// To prevent this command from being executed, return <see langword="true"/>, otherwise return <see langword="false"/>.
 		/// Resource will be in the <see cref="api::resource_usage::depth_stencil_write"/> state.
+		/// One of the depth or stencil clear value arguments may be <see langword="nullptr"/> when the respective component is not cleared.
 		/// </remarks>
 		clear_depth_stencil_view,
 
@@ -1455,6 +1469,9 @@ namespace reshade
 		/// </list>
 		/// <para>Callback function signature: <c>void (api::command_queue *queue, api::swapchain *swapchain, const api::rect *source_rect, const api::rect *dest_rect, uint32_t dirty_rect_count, const api::rect *dirty_rects)</c></para>
 		/// </summary>
+		/// <remarks>
+		/// The source and destination rectangle arguments are optional and may be <see langword="nullptr"/>.
+		/// </remarks>
 		present,
 
 		/// <summary>
@@ -1511,7 +1528,7 @@ namespace reshade
 
 		/// <summary>
 		/// Called after a screenshot was taken and saved to disk.
-		/// <para>Callback function signature: <c>void (api::effect_runtime *runtime, const char *filename)</c></para>
+		/// <para>Callback function signature: <c>void (api::effect_runtime *runtime, const char *path)</c></para>
 		/// </summary>
 		reshade_screenshot,
 
@@ -1520,6 +1537,22 @@ namespace reshade
 		/// <para>Callback function signature: <c>void (api::effect_runtime *runtime, api::effect_technique technique, api::command_list *cmd_list, api::resource_view rtv, api::resource_view rtv_srgb)</c></para>
 		/// </summary>
 		reshade_render_technique,
+
+		/// <summary>
+		/// Called after a preset was loaded and applied.
+		/// This occurs during reloading or when the user chooses a new preset in the overlay.
+		/// <para>Callback function signature: <c>void (api::effect_runtime *runtime, const char *path)</c></para>
+		/// </summary>
+		reshade_set_current_preset_path,
+
+		/// <summary>
+		/// Called when the rendering order of loaded techniques is changed.
+		/// <para>Callback function signature: <c>bool (api::effect_runtime *runtime, size_t count, api::effect_technique *techniques)</c></para>
+		/// </summary>
+		/// <remarks>
+		/// To prevent the order from being changed, return <see langword="true"/>, otherwise return <see langword="false"/>.
+		/// </remarks>
+		reshade_reorder_techniques,
 
 #ifdef RESHADE_ADDON
 		max // Last value used internally by ReShade to determine number of events in this enum
@@ -1599,12 +1632,12 @@ namespace reshade
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_pipeline_states, void, api::command_list *cmd_list, uint32_t count, const api::dynamic_state *states, const uint32_t *values);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_viewports, void, api::command_list *cmd_list, uint32_t first, uint32_t count, const api::viewport *viewports);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_scissor_rects, void, api::command_list *cmd_list, uint32_t first, uint32_t count, const api::rect *rects);
-	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::push_constants, void, api::command_list *cmd_list, api::shader_stage stages, api::pipeline_layout layout, uint32_t layout_param, uint32_t first, uint32_t count, const uint32_t *values);
+	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::push_constants, void, api::command_list *cmd_list, api::shader_stage stages, api::pipeline_layout layout, uint32_t layout_param, uint32_t first, uint32_t count, const void *values);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::push_descriptors, void, api::command_list *cmd_list, api::shader_stage stages, api::pipeline_layout layout, uint32_t layout_param, const api::descriptor_set_update &update);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_descriptor_sets, void, api::command_list *cmd_list, api::shader_stage stages, api::pipeline_layout layout, uint32_t first, uint32_t count, const api::descriptor_set *sets);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_index_buffer, void, api::command_list *cmd_list, api::resource buffer, uint64_t offset, uint32_t index_size);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_vertex_buffers, void, api::command_list *cmd_list, uint32_t first, uint32_t count, const api::resource *buffers, const uint64_t *offsets, const uint32_t *strides);
-	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_stream_output_buffers, void, api::command_list *cmd_list, uint32_t first, uint32_t count, const api::resource *buffers, const uint64_t *offsets, const uint64_t *max_sizes);
+	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::bind_stream_output_buffers, void, api::command_list *cmd_list, uint32_t first, uint32_t count, const api::resource *buffers, const uint64_t *offsets, const uint64_t *max_sizes, const api::resource *counter_buffers, const uint64_t *counter_offsets);
 
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::draw, bool, api::command_list *cmd_list, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance);
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::draw_indexed, bool, api::command_list *cmd_list, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance);
@@ -1646,7 +1679,10 @@ namespace reshade
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_set_technique_state, bool, api::effect_runtime *runtime, api::effect_technique technique, bool enabled);
 
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_overlay, void, api::effect_runtime *runtime);
-	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_screenshot, void, api::effect_runtime *runtime, const char *filename);
+	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_screenshot, void, api::effect_runtime *runtime, const char *path);
 
 	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_render_technique, void, api::effect_runtime *runtime, api::effect_technique technique, api::command_list *cmd_list, api::resource_view rtv, api::resource_view rtv_srgb);
+
+	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_set_current_preset_path, void, api::effect_runtime *runtime, const char *path);
+	RESHADE_DEFINE_ADDON_EVENT_TRAITS(addon_event::reshade_reorder_techniques, bool, api::effect_runtime *runtime, size_t count, api::effect_technique *techniques);
 }

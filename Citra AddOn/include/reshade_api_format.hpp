@@ -40,7 +40,6 @@ namespace reshade::api
 		r8g8b8a8_unorm = 28,
 		r8g8b8a8_unorm_srgb = 29,
 		r8g8b8a8_snorm = 31,
-		r8g8b8x8_typeless = 0x424757B8,
 		r8g8b8x8_unorm = 0x424757B9,
 		r8g8b8x8_unorm_srgb = 0x424757BA,
 		b8g8r8a8_typeless = 90,
@@ -60,22 +59,22 @@ namespace reshade::api
 		r16_typeless = 53,
 		r16_uint = 57,
 		r16_sint = 59,
-		r16_float = 54,
 		r16_unorm = 56,
 		r16_snorm = 58,
+		r16_float = 54,
 		l16a16_unorm = 0x3631414C,
 		r16g16_typeless = 33,
 		r16g16_uint = 36,
 		r16g16_sint = 38,
-		r16g16_float = 34,
 		r16g16_unorm = 35,
 		r16g16_snorm = 37,
+		r16g16_float = 34,
 		r16g16b16a16_typeless = 9,
 		r16g16b16a16_uint = 12,
 		r16g16b16a16_sint = 14,
-		r16g16b16a16_float = 10,
 		r16g16b16a16_unorm = 11,
 		r16g16b16a16_snorm = 13,
+		r16g16b16a16_float = 10,
 		r32_typeless = 39,
 		r32_uint = 42,
 		r32_sint = 43,
@@ -109,12 +108,12 @@ namespace reshade::api
 		d32_float = 40,
 		d32_float_s8_uint = 20,
 
-		r32_g8_typeless = 19,
-		r32_float_x8_uint = 21,
-		x32_float_g8_uint = 22,
 		r24_g8_typeless = 44,
 		r24_unorm_x8_uint = 46,
 		x24_unorm_g8_uint = 47,
+		r32_g8_typeless = 19,
+		r32_float_x8_uint = 21,
+		x32_float_g8_uint = 22,
 
 		// Compressed data formats
 
@@ -191,6 +190,8 @@ namespace reshade::api
 		case format::r8g8b8a8_unorm:
 		case format::r8g8b8a8_unorm_srgb:
 		case format::r8g8b8a8_snorm:
+		case format::r8g8b8x8_unorm:
+		case format::r8g8b8x8_unorm_srgb:
 			return format::r8g8b8a8_typeless;
 		case format::b8g8r8a8_typeless:
 		case format::b8g8r8a8_unorm:
@@ -315,7 +316,6 @@ namespace reshade::api
 			return srgb_variant == 1 ? format::r8g8b8a8_unorm_srgb : format::r8g8b8a8_unorm;
 		case format::r8g8b8a8_unorm_srgb:
 			return srgb_variant != 0 ? format::r8g8b8a8_unorm_srgb : format::r8g8b8a8_unorm;
-		case format::r8g8b8x8_typeless:
 		case format::r8g8b8x8_unorm:
 			return srgb_variant == 1 ? format::r8g8b8x8_unorm_srgb : format::r8g8b8x8_unorm;
 		case format::r8g8b8x8_unorm_srgb:
@@ -336,11 +336,11 @@ namespace reshade::api
 			return format::b10g10r10a2_unorm;
 		case format::d16_unorm:
 		case format::r16_typeless:
-			return format::r16_unorm;
+			return format::r16_float;
 		case format::r16g16_typeless:
-			return format::r16g16_unorm;
+			return format::r16g16_float;
 		case format::r16g16b16a16_typeless:
-			return format::r16g16b16a16_unorm;
+			return format::r16g16b16a16_float;
 		case format::d32_float:
 		case format::r32_typeless:
 			return format::r32_float;
@@ -434,7 +434,7 @@ namespace reshade::api
 			return  2 * width;
 		if (value <= format::a8_unorm || value == format::l8_unorm)
 			return  1 * width;
-		if (value <= format::g8r8_g8b8_unorm || (value >= format::b8g8r8a8_unorm && value <= format::b8g8r8x8_unorm_srgb) || (value >= format::r8g8b8x8_typeless && value <= format::r8g8b8x8_unorm_srgb))
+		if (value <= format::g8r8_g8b8_unorm || (value >= format::b8g8r8a8_unorm && value <= format::b8g8r8x8_unorm_srgb) || (value == format::r8g8b8x8_unorm || value == format::r8g8b8x8_unorm_srgb))
 			return  4 * width;
 
 		// Block compressed formats are bytes per block, rather than per pixel
