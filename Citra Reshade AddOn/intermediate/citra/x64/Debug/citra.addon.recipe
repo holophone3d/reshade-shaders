@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ProjectOutputs>
+    <ProjectOutput>
+      <FullPath>E:\Source\3ds_stuff\citra_reshade\reshade-shaders\Citra Reshade AddOn\Release\citra.addon</FullPath>
+    </ProjectOutput>
+  </ProjectOutputs>
+  <ContentFiles>
+    <ContentFile>
+      <FullPath>E:\Source\3ds_stuff\citra_reshade\reshade-shaders\Citra Reshade AddOn\Citra.fx</FullPath>
+    </ContentFile>
+    <ContentFile>
+      <FullPath>E:\Source\3ds_stuff\citra_reshade\reshade-shaders\Citra Reshade AddOn\shaders\looking_glass_hologram\mario_depth_disparity_lut.png</FullPath>
+    </ContentFile>
+  </ContentFiles>
+  <SatelliteDlls />
+  <NonRecipeFileRefs />
+</Project>
