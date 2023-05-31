@@ -285,7 +285,7 @@ float2 RemapBackBufferToImage(float2 pos, int side)
 		remappedPos.x = lerp(startX, startX + imageWidth, remappedPos.x);
 
 		// Remap the Y coordinate to the range of the images
-		remappedPos.y = (remappedPos.y - 0.5) / imageHeight + 0.5;
+		remappedPos.y = lerp(0.5 - imageHeight / 2.0, 0.5 + imageHeight / 2.0, remappedPos.y);
 	}
 	else
 	{
@@ -377,9 +377,43 @@ float cosSim(float3 x, float3 y)
 	return dot(x, y) / (length(x) * length(y));
 }
 
-float4 getShiftedColorDepthInfo(float2 normalized_coords, out float4 left_rgb, out float4 right_rgb, out float left_d, out float right_d, out float depth_shifted_x_l, out float depth_shifted_x_r)
+float4 getShiftedColorDepthInfo(float2 normalized_coords, float x_shift, inout float alpha, out float3 left_rgb, out float3 right_rgb, out float left_d, out float right_d, out float depth_shifted_x_l, out float depth_shifted_x_r)
 {
 	float4 color = float4(1.0, 1.0, 1.0, 1.0);
+
+	float depth_l = GetModDepth(DepthLeft, normalized_coords);
+	float depth_r = GetModDepth(DepthRight, normalized_coords);
+
+	float2 Shift_L = float2(get_depth_shift(normalized_coords, depth_l, x_shift), 0.0);
+	float2 Shift_R = float2(get_depth_shift(normalized_coords, depth_r, x_shift), 0.0);
+
+	depth_l = GetModDepth(DepthLeft, normalized_coords - alpha * Shift_L);
+	depth_r = GetModDepth(DepthRight, normalized_coords + (1.0 - alpha) * Shift_R);
+
+	// compute normalized shifted position
+	depth_shifted_x_l = clamp(normalized_coords.x - alpha * get_depth_shift(normalized_coords, depth_l, x_shift), 0.0, 1.0);
+	depth_shifted_x_r = clamp(normalized_coords.x + (1.0 - alpha) * get_depth_shift(normalized_coords, depth_r, x_shift), 0.0, 1.0);
+
+	// Handle warping beyond known pixel data for single images and both images screen edge occlusion
+	// we've exceeded pixel data for one image, so only use the data from the image still in bounds
+	if (depth_shifted_x_l == 0.0)
+		alpha = 1.0;
+	else if (depth_shifted_x_r == 1.0)
+		alpha = 0.0;
+
+	// sample alpha mixed pixels at shifted positions
+	float3 left_rgb1 = getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
+	float3 right_rgb1 = getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
+
+	// clamp color_mix_alpha so as not to over saturate colors below when using extended alpha
+	float color_mix_alpha = clamp(alpha, 0.0, 1.0);
+
+	// sample alpha mixed pixels at shifted positions
+	left_rgb = (1.0 - color_mix_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
+	right_rgb = color_mix_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
+
+	color = float4(left_rgb + right_rgb, 1.0);
+
 	return color;
 }
 
@@ -395,6 +429,7 @@ float4 get_Im(float2 normalized_coords, float alpha)
 	float depth_l = GetModDepth(DepthLeft, normalized_coords);
 	float depth_r = GetModDepth(DepthRight, normalized_coords);
 
+	bool attempt_adaptive_offset = true;
 	// find best offset to account for adaptive camera angles
 	int range = fUIAdaptiveOffsetRange;
 	for (int i = range; i >= -range; i--)
@@ -416,19 +451,23 @@ float4 get_Im(float2 normalized_coords, float alpha)
 		if (depth_shifted_x_l < 0.0)
 		{
 			alpha = 1.0;
+			attempt_adaptive_offset = false;
 		}
 		else if (depth_shifted_x_r > 1.0)
 		{
 			alpha = 0.0;
+			attempt_adaptive_offset = false;
 		}
 		// we've exceeded all known pixel data for both images so just extend the last values
 		if (depth_shifted_x_r < 0.0)
 		{
 			depth_shifted_x_r = 0.005;
+			attempt_adaptive_offset = false;
 		}
 		if (depth_shifted_x_l > 1.0)
 		{
 			depth_shifted_x_l = 0.995;
+			attempt_adaptive_offset = false;
 		}
 
 
