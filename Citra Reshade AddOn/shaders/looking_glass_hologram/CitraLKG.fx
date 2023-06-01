@@ -94,7 +94,7 @@ uniform float fUIDepthPercent <
 ui_category = "Render Mode";
 ui_label = "Depth%";
 ui_min = 0; ui_max = 256;
-ui_step = 5;
+ui_step = 1;
 > = 100;
 uniform int iUIDepthTechnique <
 	ui_type = "combo";
@@ -256,7 +256,9 @@ float3 GetScreenSpaceNormal(sampler depth_tex, float2 texcoord)
 
 	return normalize(cross(vertCenter - vertNorth, vertCenter - vertEast)) * 0.5 + 0.5;
 }
+
 // extracts clean L and R images from the SxS backbuffer no matter what size the base window is
+// still not perfect for all layouts, but pretty close and works well with LKG
 float2 RemapBackBufferToImage(float2 pos, int side)
 {
 	// Define the aspect ratio
@@ -273,11 +275,13 @@ float2 RemapBackBufferToImage(float2 pos, int side)
 		float imageWidth = BUFFER_HEIGHT / ASPECT_RATIO;
 		float imageHeight = BUFFER_HEIGHT;
 
-		// Normalize imageWidth and imageHeight between 0 and 1
-		imageWidth /= BUFFER_WIDTH;
-		imageHeight /= BUFFER_HEIGHT;
+		// ensure with is even so we don't have odd or fractional pixels
+		imageWidth = (imageWidth % 2) == 0 ? imageWidth : imageWidth - 1;
 
-		// TODO: figure out why side 2 has a one pixel gap on left and right side
+		// Normalize imageWidth and imageHeight between 0 and 1
+		imageWidth *= BUFFER_PIXEL_SIZE.x;
+		imageHeight *= BUFFER_PIXEL_SIZE.y;
+
 		// Calculate the starting X position based on the side parameter
 		float startX = (side == 1) ? 0.25 - (imageWidth / 2.0) : 0.75 - (imageWidth / 2.0);
 
@@ -293,9 +297,12 @@ float2 RemapBackBufferToImage(float2 pos, int side)
 		float imageWidth = BUFFER_WIDTH / 2.0;
 		float imageHeight = imageWidth * ASPECT_RATIO;
 
+		// ensure with is even so we don't have odd or fractional pixels
+		imageWidth = (imageWidth % 2) == 0 ? imageWidth : imageWidth - 1;
+
 		// Normalize imageWidth and imageHeight between 0 and 1
-		imageWidth /= BUFFER_WIDTH;
-		imageHeight /= BUFFER_HEIGHT;
+		imageWidth *= BUFFER_PIXEL_SIZE.x;
+		imageHeight *= BUFFER_PIXEL_SIZE.y;
 
 		// Calculate the starting Y position based on the side parameter
 		float startY = 0.5 - (imageHeight / 2.0);
@@ -377,12 +384,12 @@ float cosSim(float3 x, float3 y)
 	return dot(x, y) / (length(x) * length(y));
 }
 
-float4 getShiftedColorDepthInfo(float2 normalized_coords, float x_shift, inout float alpha, out float3 left_rgb, out float3 right_rgb, out float left_d, out float right_d, out float depth_shifted_x_l, out float depth_shifted_x_r)
+float4 getShiftedColorDepthInfo(float2 normalized_coords, int x_shift, in float alpha, out float3 left_rgb, out float3 right_rgb, out float depth_l, out float depth_r, out float depth_shifted_x_l, out float depth_shifted_x_r, out float depth_shifted_alpha)
 {
 	float4 color = float4(1.0, 1.0, 1.0, 1.0);
 
-	float depth_l = GetModDepth(DepthLeft, normalized_coords);
-	float depth_r = GetModDepth(DepthRight, normalized_coords);
+	depth_l = GetModDepth(DepthLeft, normalized_coords);
+	depth_r = GetModDepth(DepthRight, normalized_coords);
 
 	float2 Shift_L = float2(get_depth_shift(normalized_coords, depth_l, x_shift), 0.0);
 	float2 Shift_R = float2(get_depth_shift(normalized_coords, depth_r, x_shift), 0.0);
@@ -396,21 +403,29 @@ float4 getShiftedColorDepthInfo(float2 normalized_coords, float x_shift, inout f
 
 	// Handle warping beyond known pixel data for single images and both images screen edge occlusion
 	// we've exceeded pixel data for one image, so only use the data from the image still in bounds
-	if (depth_shifted_x_l == 0.0)
+	if (depth_shifted_x_l <= 0.001)
+	{
 		alpha = 1.0;
+		depth_shifted_x_l = 0.001;
+	}
 	else if (depth_shifted_x_r == 1.0)
 		alpha = 0.0;
 
-	// sample alpha mixed pixels at shifted positions
-	float3 left_rgb1 = getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
-	float3 right_rgb1 = getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
+	// TODO: figure out why 0.0 is grabbing bits from elsewhere
+	if (depth_shifted_x_r <= 0.001)
+	{
+		alpha = 1.0;
+		depth_shifted_x_r = 0.001;
+	}
+	else if (depth_shifted_x_l == 1.0)
+		alpha = 0.0;
 
 	// clamp color_mix_alpha so as not to over saturate colors below when using extended alpha
-	float color_mix_alpha = clamp(alpha, 0.0, 1.0);
+	depth_shifted_alpha = clamp(alpha, 0.0, 1.0);
 
 	// sample alpha mixed pixels at shifted positions
-	left_rgb = (1.0 - color_mix_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
-	right_rgb = color_mix_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
+	left_rgb = (1.0 - depth_shifted_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
+	right_rgb = depth_shifted_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
 
 	color = float4(left_rgb + right_rgb, 1.0);
 
@@ -420,88 +435,63 @@ float4 getShiftedColorDepthInfo(float2 normalized_coords, float x_shift, inout f
 float4 get_Im(float2 normalized_coords, float alpha)
 {
 
+	float3 left_rgb;
+	float3 right_rgb;
+	float depth_l;
+	float depth_r;
+	float depth_shifted_x_l;
+	float depth_shifted_x_r;
+	float depth_shifted_alpha;
 
-	float best_xl = normalized_coords.x;
-	float best_xr = normalized_coords.x;
-	float3 best_pixel_delta = float3(1.0, 1.0, 1.0);
-	float best_cs = 1.0;
+	float4 color = getShiftedColorDepthInfo(normalized_coords, fUIOffset, alpha, left_rgb, right_rgb, depth_l, depth_r, depth_shifted_x_l, depth_shifted_x_r, depth_shifted_alpha);
 
-	float depth_l = GetModDepth(DepthLeft, normalized_coords);
-	float depth_r = GetModDepth(DepthRight, normalized_coords);
-
-	bool attempt_adaptive_offset = true;
-	// find best offset to account for adaptive camera angles
-	int range = fUIAdaptiveOffsetRange;
-	for (int i = range; i >= -range; i--)
+	// adaptive offset
+	//TODO: offset is getting weird at more alpha levels
+	if (alpha >= 0.005 || alpha <= 0.995)
 	{
-		float x_shift = (i * 0.5) + fUIOffset;
+		float best_xl = depth_shifted_x_l;
+		float best_xr = depth_shifted_x_r;
+		float4 best_color = color;
+		float3 best_pixel_delta = left_rgb - right_rgb;
+		float best_cs = cosSim(left_rgb, right_rgb);
 
-		float2 Shift_L = float2(get_depth_shift(normalized_coords, depth_l, x_shift), 0.0);
-		float2 Shift_R = float2(get_depth_shift(normalized_coords, depth_r, x_shift), 0.0);
+		// find best offset to account for adaptive camera angles
+		int range = fUIAdaptiveOffsetRange;
+		for (int i = range; i >= -range; i--)
+		{
+			float x_shift = (i * 0.5) + fUIOffset;
 
-		depth_l = GetModDepth(DepthLeft, normalized_coords - alpha * Shift_L);
-		depth_r = GetModDepth(DepthRight, normalized_coords + (1.0 - alpha) * Shift_R);
+			float4 test_color = getShiftedColorDepthInfo(normalized_coords, x_shift, alpha, left_rgb, right_rgb, depth_l, depth_r, depth_shifted_x_l, depth_shifted_x_r, depth_shifted_alpha);
 
-		// compute normalized shifted position
-		float depth_shifted_x_l = normalized_coords.x - alpha * get_depth_shift(normalized_coords, depth_l, x_shift);
-		float depth_shifted_x_r = normalized_coords.x + (1.0 - alpha) * get_depth_shift(normalized_coords, depth_r, x_shift);
+			float3 delta = left_rgb - right_rgb;
+			float cs = cosSim(left_rgb, right_rgb);
+			if (i != 0 && length(delta) <= length(best_pixel_delta))
+			{
+				best_xl = depth_shifted_x_l;
+				best_xr = depth_shifted_x_r;
+				best_pixel_delta = delta;
+				best_cs = cs;
+				best_color = test_color;
+				if (length(delta) < 0.01)
+					break;
+			}
 
-		// Handle warping beyond known pixel data for single images and both images screen edge occlusion
-		// we've exceeded pixel data for one image, so only use the data from the image still in bounds
-		if (depth_shifted_x_l < 0.0)
-		{
-			alpha = 1.0;
-			attempt_adaptive_offset = false;
-		}
-		else if (depth_shifted_x_r > 1.0)
-		{
-			alpha = 0.0;
-			attempt_adaptive_offset = false;
-		}
-		// we've exceeded all known pixel data for both images so just extend the last values
-		if (depth_shifted_x_r < 0.0)
-		{
-			depth_shifted_x_r = 0.005;
-			attempt_adaptive_offset = false;
-		}
-		if (depth_shifted_x_l > 1.0)
-		{
-			depth_shifted_x_l = 0.995;
-			attempt_adaptive_offset = false;
 		}
 
-
-		// sample alpha mixed pixels at shifted positions
-		float3 left_rgb1 = getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
-		float3 right_rgb1 = getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
-		float3 delta = left_rgb1 - right_rgb1;
-		float cs = cosSim(left_rgb1, right_rgb1);
-		if (length(delta) <= length(best_pixel_delta))
-		{
-			best_xl = depth_shifted_x_l;
-			best_xr = depth_shifted_x_r;
-			best_pixel_delta = delta;
-			best_cs = cs;
-			if (length(delta) < 0.1)
-				break;
-		}
-
+		color = best_color;
+		depth_shifted_x_l = best_xl;
+		depth_shifted_x_r = best_xr;
 	}
 
-	float depth_shifted_x_l = best_xl;
-	float depth_shifted_x_r = best_xr;
-
-	// clamp color_mix_alpha so as not to over saturate colors below when using extended alpha
-	float color_mix_alpha = clamp(alpha, 0.0, 1.0);
-
-	// sample alpha mixed pixels at shifted positions
-	float3 left_rgb = (1.0 - color_mix_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
-	float3 right_rgb = color_mix_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
-
-	float4 color = float4(left_rgb + right_rgb, 1.0);
 
 	if (iUIDepthDebuggerMode != 0)
 	{
+		bool emphasizeActivePixel = false;
+		// darken non active depth layers
+		if ((quantizeDepth(depth_l) == fUIDepthLayer && quantizeDepth(depth_r) == fUIDepthLayer))
+		{
+			emphasizeActivePixel = true;
+		}
 		// Depth debugger visualization
 		switch (iUIDepthDebuggerMode)
 		{
@@ -511,32 +501,32 @@ float4 get_Im(float2 normalized_coords, float alpha)
 			break;
 		case 2: //color delta
 			float intensity_boost = 8.0;
-			if (alpha > 0.5)
+			if (depth_shifted_alpha > 0.5)
 				color = float4((left_rgb - right_rgb), 1.0);
 			else
 				color = float4((right_rgb - left_rgb), 1.0);
 
-			color = intensity_boost * color * getLeftRGB(normalized_coords);
+			color = color * getLeftRGB(normalized_coords);
+			if (emphasizeActivePixel)
+				color += float4(0.1, 0.1, 0.1, 1.0);
 			break;
 		case 3: //depth
-			float ld = (1.0 - color_mix_alpha) * normalizeDepth(GetModDepth(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
-			float rd = color_mix_alpha * normalizeDepth(GetModDepth(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
+			float ld = (1.0 - depth_shifted_alpha) * normalizeDepth(GetModDepth(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
+			float rd = depth_shifted_alpha * normalizeDepth(GetModDepth(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
 			float d = ld + rd;
 			color = float4(d, d, d, 1.0);
 			break;
 		case 4: //normals
-			float3 ln = (1.0 - color_mix_alpha) * float3(GetScreenSpaceNormal(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
-			float3 rn = color_mix_alpha * float3(GetScreenSpaceNormal(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
+			float3 ln = (1.0 - depth_shifted_alpha) * float3(GetScreenSpaceNormal(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
+			float3 rn = depth_shifted_alpha * float3(GetScreenSpaceNormal(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
 			color = float4(ln + rn, 1.0);
 			break;
 		default:
 			break;
 		}
-		// darken non active depth layers
-		if (!(quantizeDepth(depth_l) == fUIDepthLayer && quantizeDepth(depth_r) == fUIDepthLayer))
-		{
-			color = color * 0.5;
-		}
+		if (!emphasizeActivePixel)
+			color *= 0.5;
+
 	}
 	return color;
 
@@ -718,57 +708,21 @@ float4 GenerateQuad(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET
 }
 
 float4 GenerateUIMask(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET{
-	float offset = 0.0;
-	if (iUIDepthDebuggerMode != 0)
-		offset = fUIOffset / 256.0;
 
-	float2 normalized_coords = float2(tex.x + offset, tex.y);
-	float alpha = 0.5;
+	float3 left_rgb;
+	float3 right_rgb;
+	float depth_l;
+	float depth_r;
+	float depth_shifted_x_l;
+	float depth_shifted_x_r;
+	float depth_shifted_alpha;
 
-	 float depthl = GetModDepth(DepthLeft, normalized_coords);
-	float depthr = GetModDepth(DepthRight, normalized_coords);
+	float4 color = getShiftedColorDepthInfo(tex, fUIOffset, fUIAlpha, left_rgb,  right_rgb, depth_l, depth_r,  depth_shifted_x_l,  depth_shifted_x_r, depth_shifted_alpha);
 
-	float2 Shift_L = float2(get_depth_shift(normalized_coords, depthl, fUIOffset), 0.0);
-	float2 Shift_R = float2(get_depth_shift(normalized_coords, depthr, fUIOffset), 0.0);
-
-	float depth_l = GetModDepth(DepthLeft, normalized_coords - alpha * Shift_L);
-	float depth_r = GetModDepth(DepthRight, normalized_coords + (1.0 - alpha) * Shift_R);
-
-	// compute normalized shifted position
-	float depth_shifted_x_l = normalized_coords.x - alpha * get_depth_shift(normalized_coords, depth_l, fUIOffset);
-	float depth_shifted_x_r = normalized_coords.x + (1.0 - alpha) * get_depth_shift(normalized_coords, depth_r, fUIOffset);
-
-	// Handle warping beyond known pixel data for single images and both images screen edge occlusion
-	// we've exceeded pixel data for one image, so only use the data from the image still in bounds
-	if (depth_shifted_x_l < 0.0)
-	{
-		alpha = 1.0;
-	}
-	else if (depth_shifted_x_r > 1.0)
-	{
-		alpha = 0.0;
-	}
-	// we've exceeded all known pixel data for both images so just extend the last values
-	if (depth_shifted_x_r < 0.0)
-	{
-		depth_shifted_x_r = 0.005;
-	}
-	if (depth_shifted_x_l > 1.0)
-	{
-		depth_shifted_x_l = 0.995;
-	}
-
-	// clamp color_mix_alpha so as not to over saturate colors below when using extended alpha
-	float color_mix_alpha = clamp(alpha, 0.0, 1.0);
-
-	// sample alpha mixed pixels at shifted positions
-	float3 left_rgb = (1.0 - color_mix_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
-	float3 right_rgb = color_mix_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
-	float3 ln = (1.0 - color_mix_alpha) * float3(GetScreenSpaceNormal(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
-	float3 rn = color_mix_alpha * float3(GetScreenSpaceNormal(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
-
-	float4 color = float4(left_rgb - right_rgb, 1.0);
-	float4 dcolor = float4(ln - rn, 1.0);
+	if (depth_shifted_alpha > 0.5)
+		color = float4((left_rgb - right_rgb), 1.0);
+	else
+		color = float4((right_rgb - left_rgb), 1.0);
 
 	if (ConvertToGrayscale(color.xyz).x > fUIClip)
 		color = float4(1.0,1.0,1.0,1.0);
