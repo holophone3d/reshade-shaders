@@ -148,21 +148,21 @@ ui_category = "Quilt/LKG Options";
 ui_label = "Depthiness";
 ui_min = 0.0; ui_max = 2.0;
 ui_step = 0.01;
-> = 0.5;
+> = 0.36;
 uniform float fUIFocus <
 	ui_type = "drag";
 ui_category = "Quilt/LKG Options";
 ui_label = "Focus";
 ui_min = 0.0; ui_max = 1.0;
 ui_step = 0.001;
-> = 0.125;
+> = 0.104;
 uniform float fUIPadding <
 	ui_type = "drag";
 ui_category = "Quilt/LKG Options";
 ui_label = "Padding";
 ui_min = 0.0; ui_max = 0.5;
 ui_step = 0.01;
-> = 0.2;
+> = 0.3;
 
 uniform float fUIClip <
 	ui_type = "drag";
