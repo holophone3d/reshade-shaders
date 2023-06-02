@@ -89,6 +89,13 @@ ui_items = "Off\0" // 0
 "Quad(Debug)\0" // 4
 "UIMask(Debug)\0"; // 5
 > = 0;
+uniform int iUIScreenMode <
+	ui_type = "combo";
+ui_category = "Render Mode";
+ui_label = "Screen Size";
+ui_items = "Full(Stretched)\0" // 0
+"LetterBox(Native)\0"; // 1
+> = 0;
 uniform float fUIDepthPercent <
 	ui_type = "drag";
 ui_category = "Render Mode";
@@ -204,7 +211,7 @@ uniform int ri = 0;
 uniform int bi = 2;
 
 // Quilt data (defaults)
-uniform float2 quilt_tile = float2(12.0, 9.0); //cols, rows, total views (will be computed)
+uniform float2 quilt_tile = float2(8.0, 6.0); //cols, rows, total views (will be computed)
 uniform int overscan = 0;
 uniform int quiltInvert = 0;
 
@@ -534,6 +541,18 @@ float4 get_Im(float2 normalized_coords, float alpha)
 
 float4 sampleImage(float2 normalized_coords, float alpha, float alpha_range_offset)
 {
+	// Native Aspect ratio
+	if (iUIScreenMode == 1)
+	{
+		// format to 3DS native aspect ration of 1.6667 400/240
+		float y_clip = (BUFFER_HEIGHT - (BUFFER_HEIGHT / 1.66667)) / BUFFER_HEIGHT / 2.0;
+		// remap y to native aspect ratio
+		if (normalized_coords.y < (1.0 - y_clip) && normalized_coords.y > y_clip)
+			normalized_coords.y = lerp(0.0, 1.0, (normalized_coords.y - y_clip) / ((1.0 - y_clip) - y_clip));
+		// exit early and return black for any pixel outside of the aspect ratio
+		else
+			return float4(0.0, 0.0, 0.0, 1.0);
+	}
 	alpha = lerp(-alpha_range_offset, 1.0 + alpha_range_offset, alpha);
 	return get_Im(normalized_coords, alpha);
 }
@@ -747,7 +766,9 @@ if (space_bar_down && !overlay_open)
 {
 	renderMode = 1;
 }
-float4 color = float4(1.0,1.0,1.0,1.0);
+
+float4 color = float4(0.0,0.0,0.0,1.0);
+
 switch (renderMode)
 {
 	case 0:
@@ -771,6 +792,7 @@ switch (renderMode)
 	default:
 		break;
 }
+
 NotifyInvalidDepthBuffers(tex, color);
 return color;
 }
