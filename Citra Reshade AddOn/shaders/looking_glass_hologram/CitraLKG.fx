@@ -148,21 +148,21 @@ ui_category = "Quilt/LKG Options";
 ui_label = "Depthiness";
 ui_min = 0.0; ui_max = 2.0;
 ui_step = 0.01;
-> = 0.36;
+> = 1.67;
 uniform float fUIFocus <
 	ui_type = "drag";
 ui_category = "Quilt/LKG Options";
 ui_label = "Focus";
-ui_min = 0.0; ui_max = 1.0;
+ui_min = -1.0; ui_max = 1.0;
 ui_step = 0.001;
-> = 0.104;
+> = 0.102;
 uniform float fUIPadding <
 	ui_type = "drag";
 ui_category = "Quilt/LKG Options";
 ui_label = "Padding";
 ui_min = 0.0; ui_max = 0.5;
 ui_step = 0.01;
-> = 0.3;
+> = 0.02;
 
 uniform float fUIClip <
 	ui_type = "drag";
@@ -211,7 +211,7 @@ uniform int ri = 0;
 uniform int bi = 2;
 
 // Quilt data (defaults)
-uniform float2 quilt_tile = float2(8.0, 6.0); //cols, rows, total views (will be computed)
+uniform float2 quilt_tile = float2(11.0, 9.0); //cols, rows, total views (will be computed)
 uniform int overscan = 0;
 uniform int quiltInvert = 0;
 
