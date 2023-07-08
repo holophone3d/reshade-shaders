@@ -103,13 +103,6 @@ ui_label = "Depth%";
 ui_min = 0; ui_max = 256;
 ui_step = 1;
 > = 100;
-uniform int iUIDepthTechnique <
-	ui_type = "combo";
-ui_category = "Render Mode";
-ui_label = "Technique";
-ui_items = "LUT\0" // 0
-"Formula\0";
-> = 1;
 
 uniform float fUIOffset <
 	ui_type = "drag";
@@ -125,6 +118,45 @@ ui_label = "Adaptive Offset Range";
 ui_min = 0; ui_max = 6;
 ui_step = 1;
 > = 2;
+uniform bool fUIUXExtract <
+	ui_category = "Render Mode";
+ui_label = "UX Extract";
+> = true;
+uniform float fUIUXOffset <
+	ui_type = "drag";
+ui_category = "Render Mode";
+ui_label = "UX Offset";
+ui_min = -100; ui_max = 100;
+ui_step = 0.5;
+> = -2.0;
+uniform float fUIUXThreshold <
+	ui_type = "drag";
+ui_category = "Render Mode";
+ui_label = "UX Threshold";
+ui_min = 0; ui_max = 3;
+ui_step = 0.01;
+> = 0;
+uniform float fUIUXShiftThreshold <
+	ui_type = "drag";
+ui_category = "Render Mode";
+ui_label = "UX Shift Threshold";
+ui_min = 0; ui_max = 3;
+ui_step = 0.01;
+> = 0;
+uniform float fUIDepthTrimLeft <
+	ui_type = "drag";
+ui_category = "Render Mode";
+ui_label = "Depth Trim Left(pixels)";
+ui_min = 0; ui_max = 200;
+ui_step = 1;
+> = 0;
+uniform float fUIDepthTrimTop <
+	ui_type = "drag";
+ui_category = "Render Mode";
+ui_label = "Depth Trim Top(pixels)";
+ui_min = 0; ui_max = 200;
+ui_step = 1;
+> = 0;
 
 uniform float fUIAlpha <
 	ui_type = "drag";
@@ -215,11 +247,6 @@ uniform float2 quilt_tile = float2(11.0, 9.0); //cols, rows, total views (will b
 uniform int overscan = 0;
 uniform int quiltInvert = 0;
 
-//offset mapping
-texture2D depth_disparity_lut_tex < source = "mario_depth_disparity_lut.png"; > { Width = 256; Height = 1; Format = RGBA8; };
-sampler DepthDisparityLut{
-	Texture = depth_disparity_lut_tex; };
-
 // match glsl mod behavior
 float mod(float x, float y) {
 	return x - y * floor(x / y);
@@ -246,8 +273,20 @@ float3 ConvertToGrayscale(float3 color)
 }
 
 // Gets depth from Citra depth buffers and returns in RGB aligned space
-float GetModDepth(sampler depth_tex, float2 tex : TEXCOORD) {
-	return tex2Dlod(depth_tex, float4(1.0 - float2(tex.y, tex.x), 0, 0)).x;
+float GetModDepth(sampler depth_tex, float2 tex : TEXCOORD, bool normalize) {
+
+	float left_trim = fUIDepthTrimLeft * BUFFER_PIXEL_SIZE.x;
+	float top_trim = fUIDepthTrimTop * BUFFER_PIXEL_SIZE.y;
+
+	// Remap the X coordinate to the range of the specified image
+	tex.x = lerp(left_trim, 1.0, tex.x);
+	// Remap the Y coordinate to the range of the specified image
+	tex.y = lerp(top_trim, 1.0, tex.y);
+
+	float depth = tex2Dlod(depth_tex, float4(1.0 - float2(tex.y, tex.x), 0, 0)).x;
+	if (normalize)
+		depth = normalizeDepth(depth);
+	return depth;
 }
 
 float3 GetScreenSpaceNormal(sampler depth_tex, float2 texcoord)
@@ -257,9 +296,9 @@ float3 GetScreenSpaceNormal(sampler depth_tex, float2 texcoord)
 	float2 posNorth = posCenter - offset.zy;
 	float2 posEast = posCenter + offset.xz;
 
-	float3 vertCenter = float3(posCenter - 0.5, 1) * GetModDepth(depth_tex, posCenter);
-	float3 vertNorth = float3(posNorth - 0.5, 1) * GetModDepth(depth_tex, posNorth);
-	float3 vertEast = float3(posEast - 0.5, 1) * GetModDepth(depth_tex, posEast);
+	float3 vertCenter = float3(posCenter - 0.5, 1) * GetModDepth(depth_tex, posCenter, false);
+	float3 vertNorth = float3(posNorth - 0.5, 1) * GetModDepth(depth_tex, posNorth, false);
+	float3 vertEast = float3(posEast - 0.5, 1) * GetModDepth(depth_tex, posEast, false);
 
 	return normalize(cross(vertCenter - vertNorth, vertCenter - vertEast)) * 0.5 + 0.5;
 }
@@ -327,7 +366,6 @@ float2 RemapBackBufferToImage(float2 pos, int side)
 	return remappedPos;
 }
 
-
 float4 getLeftRGB(float2 normalized_coords)
 {
 	return tex2D(ReShade::BackBuffer, RemapBackBufferToImage(normalized_coords, 1));
@@ -338,51 +376,34 @@ float4 getRightRGB(float2 normalized_coords)
 	return tex2D(ReShade::BackBuffer, RemapBackBufferToImage(normalized_coords, 2));
 }
 
-float4 getLeftDepth(float2 normalized_coords)
+float4 getLeftDepth(float2 normalized_coords, bool normalize)
 {
-	float depth = GetModDepth(DepthLeft, normalized_coords);
-	return float4(depth, depth, depth, 1.0);
+	float d = GetModDepth(DepthLeft, normalized_coords, normalize);
+	return float4(d, d, d, 1.0);
 }
 
-float4 getRightDepth(float2 normalized_coords)
+float4 getRightDepth(float2 normalized_coords, bool normalize)
 {
-	float depth = GetModDepth(DepthRight, normalized_coords);
-	return float4(depth, depth, depth, 1.0);
+	float d = GetModDepth(DepthRight, normalized_coords, normalize);
+	return float4(d, d, d, 1.0);
+}
+
+float4 getLeftNormal(float2 normalized_coords)
+{
+	return float4(GetScreenSpaceNormal(DepthLeft, normalized_coords), 1.0);
+}
+
+float4 getRightNormal(float2 normalized_coords)
+{
+	return float4(GetScreenSpaceNormal(DepthRight, normalized_coords), 1.0);
 }
 
 // Determines how far to shift a pixel based on depth information
 float get_depth_shift(float2 normalized_coords, float depth_value, float offset_adjustment)
 {
-
-	float offset = 0.0;
-	if (iUIDepthTechnique == 0)
-	{
-		float x_offset_index = quantizeDepth(depth_value) / 256.0;
-		float depth_disparity = tex2D(DepthDisparityLut, float2(x_offset_index, 0.5)).x * 256.0;
-		//TODO:
-		// set texture details directly and switch to png for offsetLUT{ Width = 100; Height = 100; Format = RGBA8; }
-		// explore using a depth histogram to dynamically pick different offset luts
-		// keep a running histogram of depth data
-		// encode depth histogram information in a way that the first pixel can be used to find the matching histogram
-		int calibrated_offset = -128; //mid point of calibrated for 3d depth in
-		if (fUIDepthPercent < 100)
-		{
-			calibrated_offset = -256 + (fUIDepthPercent / 100.0) * 128;
-		}
-		else if (fUIDepthPercent > 100)
-		{
-			calibrated_offset += -((100 - fUIDepthPercent) / 100.0) * 128;
-		}
-		calibrated_offset += offset_adjustment;
-
-		offset = (depth_disparity / 256.0) + (depth_disparity / 256.0) * calibrated_offset / 256.0;
-	}
-	else
-	{
-		//TODO: Working formula for depth at 100% - need to explore further
-		offset = (1.181 + (-0.909 / depth_value)) * ((fUIDepthPercent / 100.0) * 0.325);
-		offset += offset_adjustment / 256.0;
-	}
+	//TODO: Working formula for depth at 100% - need to compute this adaptively
+	float offset = (1.181 + (-0.909 / depth_value)) * ((fUIDepthPercent / 100.0) * 0.325);
+	offset += offset_adjustment / 256.0;
 	return offset;
 }
 
@@ -395,14 +416,14 @@ float4 getShiftedColorDepthInfo(float2 normalized_coords, int x_shift, in float 
 {
 	float4 color = float4(1.0, 1.0, 1.0, 1.0);
 
-	depth_l = GetModDepth(DepthLeft, normalized_coords);
-	depth_r = GetModDepth(DepthRight, normalized_coords);
+	depth_l = GetModDepth(DepthLeft, normalized_coords, false);
+	depth_r = GetModDepth(DepthRight, normalized_coords, false);
 
 	float2 Shift_L = float2(get_depth_shift(normalized_coords, depth_l, x_shift), 0.0);
 	float2 Shift_R = float2(get_depth_shift(normalized_coords, depth_r, x_shift), 0.0);
 
-	depth_l = GetModDepth(DepthLeft, normalized_coords - alpha * Shift_L);
-	depth_r = GetModDepth(DepthRight, normalized_coords + (1.0 - alpha) * Shift_R);
+	depth_l = GetModDepth(DepthLeft, normalized_coords - alpha * Shift_L, false);
+	depth_r = GetModDepth(DepthRight, normalized_coords + (1.0 - alpha) * Shift_R, false);
 
 	// compute normalized shifted position
 	depth_shifted_x_l = clamp(normalized_coords.x - alpha * get_depth_shift(normalized_coords, depth_l, x_shift), 0.0, 1.0);
@@ -429,8 +450,18 @@ float4 getShiftedColorDepthInfo(float2 normalized_coords, int x_shift, in float 
 
 	// clamp color_mix_alpha so as not to over saturate colors below when using extended alpha
 	depth_shifted_alpha = clamp(alpha, 0.0, 1.0);
+	/*
+		if (depth_shifted_alpha < 0.75 && depth_shifted_alpha > 0.25)
+		{
+			// test ensure that background pixels don't occlude closer pixels
+			if(depth_shifted_x_l > depth_shifted_x_r)
+				depth_shifted_alpha = 0.0;
+			else if(depth_shifted_x_l < depth_shifted_x_r)
+				depth_shifted_alpha = 1.0;
+		}
 
-	// sample alpha mixed pixels at shifted positions
+		*/
+		// sample alpha mixed pixels at shifted positions
 	left_rgb = (1.0 - depth_shifted_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
 	right_rgb = depth_shifted_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
 
@@ -451,6 +482,71 @@ float4 get_Im(float2 normalized_coords, float alpha)
 	float depth_shifted_alpha;
 
 	float4 color = getShiftedColorDepthInfo(normalized_coords, fUIOffset, alpha, left_rgb, right_rgb, depth_l, depth_r, depth_shifted_x_l, depth_shifted_x_r, depth_shifted_alpha);
+
+	if (fUIUXExtract)
+	{
+		// test to see if the pixel matches better at the UX target layer, it might be UX so dont depth shift it
+
+		float3 shifted_left_rgb = getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
+		float3 shifted_right_rgb = getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
+		float3 shifted_delta = abs(shifted_left_rgb - shifted_right_rgb);
+
+		float Shift_L = fUIUXOffset * BUFFER_PIXEL_SIZE.x;
+		float Shift_R = -fUIUXOffset * BUFFER_PIXEL_SIZE.x;
+
+		float3 ux_left_rgb = getLeftRGB(float2(Shift_L, normalized_coords.y)).xyz;
+		float3 ux_right_rgb = getRightRGB(float2(Shift_R, normalized_coords.y)).xyz;
+		float3 ux_delta = abs(ux_left_rgb - ux_right_rgb);
+		if (length(ux_delta) < fUIUXThreshold && length(shifted_delta) > fUIUXShiftThreshold)
+		{
+
+			depth_l = 230;
+			depth_r = 230;
+
+			// compute normalized shifted position
+			depth_shifted_x_l = clamp(normalized_coords.x - alpha * get_depth_shift(normalized_coords, depth_l, fUIOffset), 0.0, 1.0);
+			depth_shifted_x_r = clamp(normalized_coords.x + (1.0 - alpha) * get_depth_shift(normalized_coords, depth_r, fUIOffset), 0.0, 1.0);
+
+			// Handle warping beyond known pixel data for single images and both images screen edge occlusion
+			// we've exceeded pixel data for one image, so only use the data from the image still in bounds
+			if (depth_shifted_x_l <= 0.001)
+			{
+				alpha = 1.0;
+				depth_shifted_x_l = 0.001;
+			}
+			else if (depth_shifted_x_r == 1.0)
+				alpha = 0.0;
+
+			// TODO: figure out why 0.0 is grabbing bits from elsewhere
+			if (depth_shifted_x_r <= 0.001)
+			{
+				alpha = 1.0;
+				depth_shifted_x_r = 0.001;
+			}
+			else if (depth_shifted_x_l == 1.0)
+				alpha = 0.0;
+
+			// clamp color_mix_alpha so as not to over saturate colors below when using extended alpha
+			depth_shifted_alpha = clamp(alpha, 0.0, 1.0);
+			/*
+				if (depth_shifted_alpha < 0.75 && depth_shifted_alpha > 0.25)
+				{
+					// test ensure that background pixels don't occlude closer pixels
+					if(depth_shifted_x_l > depth_shifted_x_r)
+						depth_shifted_alpha = 0.0;
+					else if(depth_shifted_x_l < depth_shifted_x_r)
+						depth_shifted_alpha = 1.0;
+				}
+
+				*/
+				// sample alpha mixed pixels at shifted positions
+			left_rgb = (1.0 - depth_shifted_alpha) * getLeftRGB(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
+			right_rgb = depth_shifted_alpha * getRightRGB(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
+
+			color = float4(left_rgb + right_rgb, 1.0);
+
+		}
+	}
 
 	// adaptive offset
 	//TODO: offset is getting weird at more alpha levels
@@ -507,25 +603,19 @@ float4 get_Im(float2 normalized_coords, float alpha)
 		case 1: //color
 			break;
 		case 2: //color delta
-			float intensity_boost = 8.0;
-			if (depth_shifted_alpha > 0.5)
-				color = float4((left_rgb - right_rgb), 1.0);
-			else
-				color = float4((right_rgb - left_rgb), 1.0);
-
-			color = color * getLeftRGB(normalized_coords);
+			color = float4(abs(right_rgb - left_rgb), 1.0);
 			if (emphasizeActivePixel)
 				color += float4(0.1, 0.1, 0.1, 1.0);
 			break;
 		case 3: //depth
-			float ld = (1.0 - depth_shifted_alpha) * normalizeDepth(GetModDepth(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
-			float rd = depth_shifted_alpha * normalizeDepth(GetModDepth(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
+			float ld = (1.0 - depth_shifted_alpha) * getLeftDepth(float2(depth_shifted_x_l, normalized_coords.y), true).x;
+			float rd = depth_shifted_alpha * getRightDepth(float2(depth_shifted_x_r, normalized_coords.y), true).x;
 			float d = ld + rd;
 			color = float4(d, d, d, 1.0);
 			break;
 		case 4: //normals
-			float3 ln = (1.0 - depth_shifted_alpha) * float3(GetScreenSpaceNormal(DepthLeft, float2(depth_shifted_x_l, normalized_coords.y)));
-			float3 rn = depth_shifted_alpha * float3(GetScreenSpaceNormal(DepthRight, float2(depth_shifted_x_r, normalized_coords.y)));
+			float3 ln = (1.0 - depth_shifted_alpha) * getLeftNormal(float2(depth_shifted_x_l, normalized_coords.y)).xyz;
+			float3 rn = depth_shifted_alpha * getRightNormal(float2(depth_shifted_x_r, normalized_coords.y)).xyz;
 			color = float4(ln + rn, 1.0);
 			break;
 		default:
@@ -719,9 +809,9 @@ float4 GenerateQuad(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET
   else if (tex.x >= 0.5 && tex.y < 0.5)
 	return getRightRGB(float2(tex.x - 0.5, tex.y) * 2.0);
   else if (tex.x < 0.5 && tex.y >= 0.5)
-	return getLeftDepth(float2(tex.x,tex.y - 0.5) * 2.0);
+	return getLeftDepth(float2(tex.x,tex.y - 0.5) * 2.0, false);
   else if (tex.x >= 0.5 && tex.y >= 0.5)
-	return getRightDepth((tex - 0.5) * 2.0);
+	return getRightDepth((tex - 0.5) * 2.0, false);
   else
 	return float4(1.0,0.0,0.0,1.0);
 }
@@ -737,12 +827,7 @@ float4 GenerateUIMask(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARG
 	float depth_shifted_alpha;
 
 	float4 color = getShiftedColorDepthInfo(tex, fUIOffset, fUIAlpha, left_rgb,  right_rgb, depth_l, depth_r,  depth_shifted_x_l,  depth_shifted_x_r, depth_shifted_alpha);
-
-	if (depth_shifted_alpha > 0.5)
-		color = float4((left_rgb - right_rgb), 1.0);
-	else
-		color = float4((right_rgb - left_rgb), 1.0);
-
+	color = float4(abs(right_rgb - left_rgb), 1.0);
 	if (ConvertToGrayscale(color.xyz).x > fUIClip)
 		color = float4(1.0,1.0,1.0,1.0);
 	else
@@ -753,7 +838,7 @@ float4 GenerateUIMask(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARG
 
 void NotifyInvalidDepthBuffers(float2 tex, inout float4 color)
 {
-	if ((tex.x > 0.9 && tex.y > 0.9) && ((GetModDepth(DepthLeft, tex) <= 0.001) || (GetModDepth(DepthRight, tex) <= 0.001)))
+	if ((tex.x > 0.9 && tex.y > 0.9) && ((GetModDepth(DepthLeft, tex, false) <= 0.001) || (GetModDepth(DepthRight, tex, false) <= 0.001)))
 	{
 		color = float4(1.0, 0.0, 0.0, 1.0);
 	}
@@ -796,8 +881,11 @@ switch (renderMode)
 NotifyInvalidDepthBuffers(tex, color);
 return color;
 }
-
 technique CitraLKG {
+	//TODO: Always render the synthetic : image, depth and normals to texures
+	// render modes are mainly overrides?
+	// alternatively render offset maps, that contain the x/y pos in the LR images for lookup - maybe use xy for L and zw for R? - ideally float backed for precision, not int backed
+
 	pass {
 		VertexShader = PostProcessVS;
 		PixelShader = RenderImage;
