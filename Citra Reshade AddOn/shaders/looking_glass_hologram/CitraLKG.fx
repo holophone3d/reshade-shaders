@@ -77,6 +77,25 @@ sampler RGBRight{
 	AddressW = WRAP;
 };
 
+uniform int DEPTH_HISTOGRAM_BINS_NUM = 256;
+uniform int DEPTH_HISTOGRAM_SMOOTHNESS = 1;
+uniform int DEPTH_HISTOGRAM_SAMPLES_X = 400;
+uniform int DEPTH_HISTOGRAM_SAMPLES_Y = 240;
+
+
+// DEPTH histograms
+texture HistogramTex{ Width = 256;   Height = 1; };
+sampler sHistogramTex{ Texture = HistogramTex; };
+
+// DEPTH slice far images
+texture DepthSliceTex{ Width = 400;   Height = 240; };
+sampler sDepthSliceTex{ Texture = DepthSliceTex; };
+
+// DEPTH Transform 
+texture DepthTransformTex{ Width = 1;   Height = 1; };
+sampler sDepthTransformTex{ Texture = DepthTransformTex; };
+
+
 // -- Options --
 uniform int iUIRenderMode <
 	ui_type = "combo";
@@ -262,7 +281,6 @@ float normalizeDepth(float depth)
 
 int quantizeDepth(float depth)
 {
-	float norm_depth = normalizeDepth(depth);
 	return floor(depth * 256);
 }
 
@@ -877,16 +895,195 @@ switch (renderMode)
 	default:
 		break;
 }
+color = tex2D(sDepthSliceTex, tex);
 
+if (tex.y < 0.1)
+	color = tex2D(sHistogramTex, float2(tex.x, 0)).xxx;
+if (tex.y < 0.05)
+	color = tex2D(sHistogramTex, float2(tex.x, 0)).yyy;
 NotifyInvalidDepthBuffers(tex, color);
 return color;
 }
+
+// modified version of histogram from martymcfly
+// some stability issues here, seems worse on some parts of games and when not in performance mode
+// https://github.com/martymcmodding/qUINT/blob/65fee6f2f00b9e86667dd986c0b196331dd193c2/Shaders/qUINT_lightroom.fx
+// very expensive to compute both textures every frame
+void PS_HistogramGenerate(float4 vpos : SV_Position, float2 uv : TEXCOORD, out float4 res : SV_Target0)
+{
+	res = 0; float4 coord = 0;
+	coord.z = rcp(DEPTH_HISTOGRAM_SAMPLES_X);
+	coord.w = rcp(DEPTH_HISTOGRAM_SAMPLES_Y);
+
+	float2 histogram_data = float2(DEPTH_HISTOGRAM_BINS_NUM, vpos.x) / DEPTH_HISTOGRAM_SMOOTHNESS;
+
+	[loop]
+	for (int x = 0; x < DEPTH_HISTOGRAM_SAMPLES_X; x++)
+	{
+		coord.y = 0;
+		[loop]
+		for (int y = 0; y < DEPTH_HISTOGRAM_SAMPLES_Y; y++)
+		{
+			res.x += saturate(1.0 - abs(getLeftDepth(coord.xy, false).x * histogram_data.x - histogram_data.y));
+			res.y += saturate(1.0 - abs(getRightDepth(coord.xy, false).x * histogram_data.x - histogram_data.y));
+			coord.y += coord.w;
+		}
+		coord.x += coord.z;
+	}
+	res.xy /= DEPTH_HISTOGRAM_SAMPLES_X * DEPTH_HISTOGRAM_SAMPLES_Y;
+	res.xy *= 10.0;
+}
+
+float compressVector(float3 vec)
+{
+	return (vec.x + vec.y + vec.z) / 3.0;
+}
+
+void PS_DepthSliceGenerate(float4 vpos : SV_Position, float2 uv : TEXCOORD, out float4 res : SV_Target0)
+{
+	int bins = 256;
+	float step = 1.0 / DEPTH_HISTOGRAM_BINS_NUM;
+	float prev_value = 0.0;
+	float value = 0.0;
+	float2 low_max = float2(0.0, 0.0);
+	float2 high_max = float2(0.0, 0.0);
+	float2 range = float2(0.0, 1.0);
+	float2 peaks = float2(0.0, 1.0);
+	float offset = 1.0 / bins;
+	float2 max1 = float2(0.0, 0.0);
+	float2 max2 = float2(0.0, 0.0);
+	float2 max3 = float2(0.0, 0.0);
+	float2 peak_curve_data = float2(0.0, 0.0);
+
+
+	// align histograms
+	float h_align = step;
+	float2 best_h_delta = float2(bins, 0.0);
+	[loop]
+	for (int i = -3; i < 4; i++)
+	{
+
+		float histogram_delta = 0.0;
+		[loop]
+		for (int j = 0; j < bins; j++)
+		{
+			h_align = (1.0 * j) / bins;
+
+			float l_d = tex2D(sHistogramTex, float2(h_align, 0)).x;
+			float r_d = tex2D(sHistogramTex, float2(h_align + (i * step), 0)).y;
+			histogram_delta += l_d - r_d;
+		}
+		if (histogram_delta < best_h_delta.x)
+		{
+			best_h_delta.x = histogram_delta;
+			best_h_delta.y = i;
+		}
+	}
+
+
+	//find histogram peaks
+	[loop]
+	for (int x = 0; x < bins; x++)
+	{
+		offset = (1.0 * x) / bins;
+
+		value = tex2D(sHistogramTex, float2(offset, 0)).x;
+
+		if (range.x == 0.0 && value != 0.0)
+			range.x = offset;
+		if (value != 0.0)
+			range.y = offset;
+
+		//detect peak - consider quantizing to reduce noise
+		peak_curve_data.y = value - prev_value;
+
+		if (peak_curve_data.x >= 0 && peak_curve_data.y < 0)
+		{
+			if (value > max3.x)
+			{
+				max1 = max2;
+				max2 = max3;
+				max3.x = value;
+				max3.y = x;
+			}
+			else if (value > max2.x)
+			{
+				max1 = max2;
+				max2.x = value;
+				max2.y = x;
+			}
+			else if (value > max1.x)
+			{
+				max1.x = value;
+				max1.y = x;
+			}
+		}
+		// update for next interval
+		prev_value = value;
+		peak_curve_data.x = peak_curve_data.y;
+
+	}
+
+	// extract histogram peaks as new color channels
+	// consider if I should create 4 render targets or just produce one image with all the info encoded in one image
+
+/*	int r_depth = quantizeDepth(getRightDepth(uv.xy, false).x);
+	if (depth == max1.y || depth == max2.y || depth == max3.y)
+	{
+		res = getRightRGB(uv.xy);
+	}
+	float v = (best_h_delta.y + 3.0) / 6.0;
+//	res = float3(v,v,v);
+*/
+
+// Extract all color channel data into a single texture
+	int r_depth = quantizeDepth(getRightDepth(uv.xy, false).x);
+	if (r_depth == max1.y)
+	{
+		res.x = compressVector(getRightRGB(uv.xy).xyz);
+	}
+	else if (r_depth == max3.y)
+	{
+		res.y = compressVector(getRightRGB(uv.xy).xyz);
+	}
+
+	int l_depth = quantizeDepth(getLeftDepth(uv.xy, false).x);
+	if (l_depth == max1.y)
+	{
+		res.z = compressVector(getLeftRGB(uv.xy).xyz);
+	}
+	else if (l_depth == max3.y)
+	{
+		res.w = compressVector(getLeftRGB(uv.xy).xyz);
+	}
+}
+
+
+
 technique CitraLKG {
 	//TODO: Always render the synthetic : image, depth and normals to texures
 	// render modes are mainly overrides?
 	// alternatively render offset maps, that contain the x/y pos in the LR images for lookup - maybe use xy for L and zw for R? - ideally float backed for precision, not int backed
 
-	pass {
+	pass PHistogramGenerate
+	{
+		VertexShader = PostProcessVS;
+		PixelShader = PS_HistogramGenerate;
+		RenderTarget = HistogramTex;
+	}
+	// align histograms pass
+	// render best depth values
+	// sDepthSliceNearRTex
+
+	pass DepthSliceGenerate
+	{
+		VertexShader = PostProcessVS;
+		PixelShader = PS_DepthSliceGenerate;
+		RenderTarget = DepthSliceTex;
+	}
+
+	pass GenerateImage
+	{
 		VertexShader = PostProcessVS;
 		PixelShader = RenderImage;
 	}
